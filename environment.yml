@@ -1,0 +1,7 @@
+name: pokeagent
+dependencies:
+  - python=3.10
+variables:
+  OPENAI_API_KEY: "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"
+  GOOGLE_API_KEY: "AIzaSyDze3agKo-KjH4SkGIAqvXqrosK7SKq6go"
+  GEMINI_API_KEY: "AIzaSyDze3agKo-KjH4SkGIAqvXqrosK7SKq6go"
