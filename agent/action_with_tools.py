@@ -1,5 +1,7 @@
 import random
 import logging
+import re
+
 from utils.vlm import VLM
 from utils.state_formatter import format_state_for_llm, format_state_summary, get_movement_options, \
     get_party_health_summary
@@ -94,7 +96,7 @@ def action_step(memory_context, current_plan, latest_observation, frame, state_d
     - Use items if pokemon is in critical condition
 
     NAVIGATION STRATEGY:
-    - **Primary Tool:** Use `<PATHFIND>{"x": x, "y": y}</PATHFIND>` for all significant overworld movement. Do not output individual direction buttons for long paths.
+    - **Primary Tool:** Use `<PATHFIND>{{"x": x, "y": y}}</PATHFIND>` for all significant overworld movement. Do not output individual direction buttons for long paths.
     - **When to Use Buttons:** Use single direction buttons *only* for:
     - Micro-adjustments (e.g., "UP" to talk to an NPC directly above you).
     - Navigating tight spaces where pathfinding might be inefficient.
@@ -113,7 +115,7 @@ def action_step(memory_context, current_plan, latest_observation, frame, state_d
     - Consider terrain: avoid wild encounters if party is weak
 
     EFFICIENCY RULES:
-    1.  **PATHFIND is Default:** Prefer `<PATHFIND>{"x": x, "y": y}</PATHFIND>` over manual movement.
+    1.  **PATHFIND is Default:** Prefer `<PATHFIND>{{"x": x, "y": y}}</PATHFIND>` over manual movement.
     2.  **Batch Actions:** Output the full sequence for a discrete task (e.g., "A, A, A, A, A" for dialogue, "DOWN, A" for a menu).
     3. For movement: repeat directions based on movement options (e.g., "UP, UP, UP, UP" if UP shows "Normal path")
     4. If uncertain, output single action and reassess
@@ -122,11 +124,11 @@ def action_step(memory_context, current_plan, latest_observation, frame, state_d
     ★★★ OUTPUT INSTRUCTIONS ★★★
     - **RETURN ONLY** a tool, or a comma-separated list of valid actions.
     - To use a tool, you must output a JSON object in a code block following this exact format:
-    <TOOL_NAME>{"argument1": 1, "argument2": 3}</TOOL_NAME>
+    <TOOL_NAME>{{"argument1": 1, "argument2": 3}}</TOOL_NAME>
     
     - **Valid Tools:** `PATHFIND`
     - PATHFIND: Takes arguments "x", "y". Automatically move to the designated coordinates (x, y) on the map.
-        - Example Usage: <PATHFIND>{"x": 10, "y": 15}</PATHFIND> moves to x=10, y=15. 
+        - Example Usage: <PATHFIND>{{"x": 10, "y": 15}}</PATHFIND> moves to x=10, y=15. 
     
     - **Valid Actions:** `A`, `B`, `SELECT`, `START`, `UP`, `DOWN`, `LEFT`, `RIGHT`, `L`, `R`, `PATHFIND(X, Y)`
 
@@ -163,6 +165,13 @@ def action_step(memory_context, current_plan, latest_observation, frame, state_d
     print(f"Raw response: '{action_response}'")
 
     # Split the response by commas and clean up
+    # if there is a function, preferentially return the function
+    # TODO messy as we are checking for functions both here and in agent.py
+    function_matches = re.search(r"<[A-Z]*>.*</[A-Z]*>", action_response)
+    if function_matches:
+        print('awt: found function', function_matches.group(0))
+        return function_matches.group(0)
+
     actions = [btn.strip() for btn in action_response.split(',') if btn.strip() in valid_buttons]
 
     print(f"Parsed actions: {actions}")

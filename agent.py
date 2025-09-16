@@ -40,7 +40,7 @@ from pokemon_env.enums import MetatileBehavior
 from agent.perception import perception_step
 from agent.planning import planning_step
 from agent.memory import memory_step
-from agent.action_with_tools import action_step  # REFERENCE using a different prompt
+from agent.action_with_tools import action_step  # cash999: using a different prompt
 from utils.vlm import VLM
 from utils.state_formatter import format_state_for_llm
 from utils.map_formatter import format_map_for_display
@@ -109,7 +109,7 @@ agent_lock = threading.Lock()
 websocket_connections = set()
 
 
-def pathfind(X, Y):
+def pathfind(X, Y, facing, **kwargs):
     deltas = world.pathfind_on_current_map((X, Y))
     # print(np.fromstring(deltas[0], dtype=int))
     if deltas is None:
@@ -118,7 +118,9 @@ def pathfind(X, Y):
     deltas = [tool_utils.directions_to_actions[np.array2string(delta, separator=' ')] for delta in deltas]
 
     # when key changes direction, the agent rotates but does not move; add an extra keypress to actually move
-    # TODO the initial keypress needs to be aware of agent current orientation because of this
+    # initial keypress handling: append initial orientation, then delete it afterwards
+    facing = tool_utils.direction_names_to_actions[facing]
+    deltas = [facing] + deltas
 
     movements = []
     print('before direction correction: ' + str(deltas))
@@ -132,11 +134,13 @@ def pathfind(X, Y):
         else:
             movements.append(delta) # TODO
 
+    movements = movements[1:]
+
     print('after direction correction: ' + str(movements))
 
-    return tool_utils.action_seq_to_agent_queue(movements)
+    return movements
 
-# tools REFERENCE
+# cash999 tools:
 tools = {
     'PATHFIND': pathfind
 }
@@ -322,7 +326,35 @@ class AgentModules:
                     self.vlm
                 )
 
-                action_list = run_tools(action_output, 'PATHFIND')
+                # these are tool args not provided by the llm
+                # e.g. pathfind tool needs the current orientation
+                # check what kwargs are needed for what tool and pipe them in
+
+                environment_kwargs = {
+                    "facing": game_state["player"]["facing"]
+                }
+
+                print(environment_kwargs)
+                print(action_output)
+
+                tool = get_tool(action_output, environment_kwargs, 'PATHFIND')
+
+
+                if tool is not None:
+                    print('detected tool')
+
+                    tool_output = tool()
+                    if tool_output is None: # failed
+                        # TODO feed back to LLM
+                        print('tool didnt output anything!')
+                        action_list = ['A'] # default action
+                    else:
+                        action_list = tool_output
+
+                else:
+                    action_list = action_output
+
+
 
                 # Convert action list to expected dictionary format
                 if isinstance(action_list, list):
@@ -439,10 +471,37 @@ Respond with just the button name (e.g., 'A' or 'RIGHT'). Be decisive and avoid 
         }
 
 
-# REFERENCE run_tools here
-def run_tools(agent_output, valid_tools):
-    # tools in this project take the format
-    # <function_name>{"x": "value_for_x", "y": "value_for_y"}</function_name>
+# cash999: get_tool here
+def get_tool(agent_output, environment_kwargs, valid_tools):
+    """
+    Processes agent output to extract and execute valid tools.
+
+    This function processes the output of an agent, identifies any calls to valid
+    tools, and executes them using the provided environment and tool parameters.
+    Each tool call is formatted as `<tool_name>{ ... }</tool_name>` in the agent's
+    output. If a matching tool is found, its execution is returned as a callable
+    function, with parameters merged from the environment and the agent's output.
+
+    Parameters:
+        agent_output: str
+            The textual output from the agent containing potential tool calls.
+        environment_kwargs: dict
+            Dictionary of environment parameters to be used or overridden by tool
+            parameters.
+        valid_tools: Union[str, List[str]]
+            A list of valid tool names or a single tool name to be identified and
+            executed.
+
+    Returns:
+        Callable:
+            A callable function to execute the identified tool with its merged
+            parameters, or None if no valid tool call is detected.
+
+    Raises:
+        json5.JSON5DecodeError:
+            If the agent output contains a tool call with invalid JSON content.
+    """
+
     if isinstance(valid_tools, str):
         valid_tools = [valid_tools]
 
@@ -453,18 +512,19 @@ def run_tools(agent_output, valid_tools):
         # multiple calls?
 
         if match is not None:
-
             try:
-                kwargs = json5.loads(match.group(0))
-                print(kwargs)
+                llm_kwargs = json5.loads(match.group(0))
+                print(llm_kwargs)
             except json5.JSON5DecodeError as e:
                 print(f"Tool " + vt + " called by agent but failed parsing JSON: {e}\nJSON: " + match.group(0))
 
-            return tools[vt](**kwargs)
-            # assume the tool produces a sequence of actions for now; future tools might not TODO
+            kwargs = environment_kwargs | llm_kwargs # overwrite environment
 
-    # else we didn't detect a tool call so just return the vanilla sequence
-    return agent_output
+            return lambda: tools[vt](**kwargs)
+            # assume the tool produces a seq of actions for now; future tools might not TODO
+
+    # else we didn't detect a tool call
+    return None
 
 
 async def broadcast_state_update():
@@ -845,9 +905,16 @@ def handle_input(manual_mode=True):
 
             elif event.key == pygame.K_7:  # run pathfinding debug test
                 if emulator:
+                    global last_game_state # using this for now
+
+                    environment_kwargs = {
+                        "facing": last_game_state["player"]["facing"]
+                    }
+
                     print('Pathfinding to ' + str(debug_pathfind_to))
-                    output = run_tools('<PATHFIND>{"x": ' + str(debug_pathfind_to[0]) + ', "y": ' + str(
-                        debug_pathfind_to[0]) + '}</PATHFIND>', 'PATHFIND')
+                    output = get_tool('<PATHFIND>{"x": ' + str(debug_pathfind_to[0]) + ', "y": ' + str(
+                        debug_pathfind_to[0]) + '}</PATHFIND>',
+                                      'PATHFIND')
                     print('Tool output: ' + str(output))
 
                     agent_result_queue = output
