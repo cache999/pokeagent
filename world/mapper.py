@@ -498,8 +498,9 @@ class Map(object):
         clip_y1 = min(arr_y1, self.max_map_size)
         clip_x1 = min(arr_x1, self.max_map_size)
 
-        if clip_y0 != arr_y0 or clip_x0 != arr_x0 or clip_y1 != arr_y1 or clip_x1 != arr_x1:
-            print('observation is out of bounds!')
+        # if clip_y0 != arr_y0 or clip_x0 != arr_x0 or clip_y1 != arr_y1 or clip_x1 != arr_x1:
+        #    print('observation is out of bounds!')
+        # currently we don't append out of bounds obs TODO shift the internal map representation
 
         if clip_x0 >= clip_x1 or clip_y0 >= clip_y1:
             # Entire observation is out of bounds; ignore
@@ -563,9 +564,14 @@ class Map(object):
         if other_name == self.memory_location:
             return (0, 0)
 
-        map_idx = list(self.directs.values()).index(other_name)
+        map_locations = [loc for loc, _ in list(self.directs.values())]
+
+        if not other_name in map_locations:
+            return None
+
+        map_idx = map_locations.index(other_name)
         if map_idx != -1:
-            self_tile = self.directs.keys()[map_idx]
+            self_tile = list(self.directs.keys())[map_idx]
             other_tile = self.directs[self_tile][1]
 
             return other_tile[0] - self_tile[0], other_tile[1] - self_tile[1]

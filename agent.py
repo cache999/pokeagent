@@ -34,6 +34,7 @@ import uvicorn
 import asyncio
 import json
 
+import sprite_comparison
 import tool_utils
 from tools import ToolLibrary
 from pokemon_env.emulator import EmeraldEmulator
@@ -120,7 +121,13 @@ def pathfind(X, Y, map_slice, facing, **kwargs):
 
     # when key changes direction, the agent rotates but does not move; add an extra keypress to actually move
     # initial keypress handling: append initial orientation, then delete it afterwards
-    facing = tool_utils.direction_names_to_actions[facing]
+    # facing = tool_utils.direction_names_to_actions[facing]
+    # the facing call is broken; use screenshot method instead TODO remove once sure useless
+
+    s = emulator.get_screenshot()
+    player = s.crop((113, 66, 127, 87))
+    facing = sprite_comparison.find_most_similar_orientation(player)
+
     deltas = [facing] + deltas
 
     movements = []
@@ -280,7 +287,7 @@ class AgentModules:
                 if simple_mode:
                     return self._simple_mode_processing(frame, game_state)
 
-                '''# Full mode: use all four agent modules
+                # Full mode: use all four agent modules
                 # 1. Perception - analyze current game state
                 observation, slow_thinking_needed = perception_step(frame, game_state, self.vlm)
                 self.last_observation = observation
@@ -314,12 +321,13 @@ class AgentModules:
                     self.vlm
                 )
                 self.current_plan = plan_result
-                self.last_plan = plan_result'''
+                self.last_plan = plan_result
 
-                observation = ''
-                self.memory_context = ''
-                self.current_plan = ''
-                self.last_plan = ''
+                # DEBUG VALUES
+                # observation = ''
+                # self.memory_context = ''
+                # self.current_plan = ''
+                # self.last_plan = ''
 
                 # 4. Action - select specific button input
                 action_list = action_step(
@@ -820,6 +828,14 @@ def handle_input(manual_mode=True):
                         print(f"State loaded from: {load_file}")
 
             # TODO this is where to add new keypresses
+            elif event.key == pygame.K_4:
+                s = emulator.get_screenshot()
+                player = s.crop((113, 66, 127, 87))
+                direction = sprite_comparison.find_most_similar_orientation(player)
+
+                print(direction)
+
+
             elif event.key == pygame.K_5:
                 if emulator:
                     log_world_map = not log_world_map
@@ -858,7 +874,37 @@ def handle_input(manual_mode=True):
             elif event.key == pygame.K_7:  # run pathfinding debug test
                 loc = emulator.memory_reader.read_location()
                 coords = emulator.memory_reader.read_coordinates()
-                print(loc, coords)
+                corners = coords[0] - 20, coords[1] + 20, coords[1] - 20, coords[1] + 20
+
+                map_slice = world.get_cropped_map(corners, loc)
+
+                map_0 = map_slice.map[:, :, 0]
+
+                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+
+                np.savetxt(f"./world/logs/csv/map_0_" + str(timestamp) + ".csv", map_0, delimiter=",")
+                # print('Map 0 saved to disk')
+
+                plt.figure(figsize=(6, 6))
+                plt.imshow(map_0, cmap='viridis', interpolation='nearest')
+
+                plt.scatter(coords[1], coords[0], color='red', marker='X', s=100,
+                            edgecolors='white', linewidths=1.5, label='Observation Location')
+
+                plt.colorbar(label='Value')
+                plt.title(f'Map 0 - {timestamp}')
+                plot_filename = f"./world/logs/images/map_0_{timestamp}.png"
+                plt.savefig(plot_filename, dpi=150, bbox_inches='tight')
+                plt.close()
+
+                print(f'Visualization saved to disk as {plot_filename}')
+
+                # also save a screenshot
+                save_screenshot()
+
+
+
+
 
 
 

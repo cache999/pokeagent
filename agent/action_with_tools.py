@@ -11,6 +11,8 @@ from agent.system_prompt import system_prompt
 # Set up module logging
 logger = logging.getLogger(__name__)
 
+ACTION_STEP_MAX_ACTIONS = 50
+
 
 def action_step(memory_context, current_plan, latest_observation, frame, state_data, world, recent_actions, vlm, tool_library):
     """
@@ -168,7 +170,9 @@ def action_step(memory_context, current_plan, latest_observation, frame, state_d
     # Split the response by commas and clean up
     # if there is a function, preferentially return the function
 
-    # we now check in the function
+    # check facing
+
+
 
     environment_kwargs = {
         "facing": state_data["player"]["facing"],
@@ -188,7 +192,7 @@ def action_step(memory_context, current_plan, latest_observation, frame, state_d
     print("-" * 80 + "\n")
 
     # Limit to maximum 10 actions and prevent excessive repetition
-    actions = actions[:10]
+    actions = actions[:ACTION_STEP_MAX_ACTIONS]
 
     # If no valid actions found, make intelligent default based on state
     if not actions:
