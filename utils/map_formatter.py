@@ -4,6 +4,7 @@ Centralized Map Formatting Utility
 
 Single source of truth for all map formatting across the codebase.
 """
+import numpy as np
 
 from pokemon_env.enums import MetatileBehavior
 
@@ -20,6 +21,7 @@ def format_tile_to_symbol(tile):
     """
     if len(tile) >= 4:
         tile_id, behavior, collision, _ = tile  # elevation not used
+
     elif len(tile) >= 2:
         tile_id, behavior = tile[:2]
         collision = 0
@@ -29,9 +31,10 @@ def format_tile_to_symbol(tile):
         collision = 0
     
     # Convert behavior to symbol using unified logic
+
     if hasattr(behavior, 'name'):
         behavior_name = behavior.name
-    elif isinstance(behavior, int):
+    elif isinstance(behavior, (int, np.integer)):
         try:
             behavior_enum = MetatileBehavior(behavior)
             behavior_name = behavior_enum.name
@@ -43,6 +46,8 @@ def format_tile_to_symbol(tile):
     # Map to symbol - SINGLE SOURCE OF TRUTH
     if tile_id == 1023:  # Unknown/unloaded tile
         return "#"  # Mark as blocked
+    if tile_id == -1:     # cash999: add support for undiscovered tiles
+        return "?"
     elif behavior_name == "NORMAL":
         return "." if collision == 0 else "#"
     elif "DOOR" in behavior_name:
@@ -60,7 +65,7 @@ def format_tile_to_symbol(tile):
     elif "BOOKSHELF" in behavior_name or "SHELF" in behavior_name:
         return "B"  # Bookshelf
     elif "SIGN" in behavior_name or "SIGNPOST" in behavior_name:
-        return "?"  # Sign/Information
+        return "I"  # Sign/Information NOTE this is changed; originally was ? # TODO check for any errors
     elif "FLOWER" in behavior_name or "PLANT" in behavior_name:
         return "F"  # Flowers/Plants
     elif "COUNTER" in behavior_name or "DESK" in behavior_name:
@@ -257,7 +262,7 @@ def get_symbol_legend():
         "PC": "PC/Computer",
         "T": "Television",
         "B": "Bookshelf", 
-        "?": "Sign/Information",
+        "I": "Sign/Information",
         "F": "Flowers/Plants",
         "C": "Counter/Desk",
         "=": "Bed",
@@ -268,7 +273,8 @@ def get_symbol_legend():
         "↘": "Jump Southeast",
         "↙": "Jump Southwest",
         "N": "NPC",
-        "@": "Trainer"
+        "@": "Trainer",
+        "?": "Unexplored"
     }
 
 
@@ -301,8 +307,9 @@ def generate_dynamic_legend(grid):
     terrain_symbols = [".", "#", "W", "~"] 
     structure_symbols = ["D", "S"]
     jump_symbols = ["J", "↗", "↖", "↘", "↙"]
-    furniture_symbols = ["PC", "T", "B", "?", "F", "C", "=", "t"]
+    furniture_symbols = ["PC", "T", "B", "I", "F", "C", "=", "t"]
     npc_symbols = ["N", "@"]
+    unexplored_symbols = ["?"]
     
     categories = [
         ("Movement", player_symbols),
@@ -310,7 +317,8 @@ def generate_dynamic_legend(grid):
         ("Structures", structure_symbols), 
         ("Jump ledges", jump_symbols),
         ("Furniture", furniture_symbols),
-        ("NPCs", npc_symbols)
+        ("NPCs", npc_symbols),
+        ("Unexplored", unexplored_symbols)
     ]
     
     for category_name, symbol_list in categories:

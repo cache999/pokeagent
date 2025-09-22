@@ -1,0 +1,4 @@
+warps_reference = {
+    ('LITTLEROOT TOWN BRENDANS HOUSE 1F', 'LITTLEROOT TOWN'): 'warp',
+    ('LITTLEROOT TOWN', 'LITTLEROOT TOWN BRENDANS HOUSE 1F'): 'warp'
+}

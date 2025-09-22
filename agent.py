@@ -35,6 +35,7 @@ import asyncio
 import json
 
 import tool_utils
+from tools import ToolLibrary
 from pokemon_env.emulator import EmeraldEmulator
 from pokemon_env.enums import MetatileBehavior
 from agent.perception import perception_step
@@ -70,7 +71,7 @@ last_game_state = None  # Cache for web interface
 recent_manual_actions = []  # Track recent manual button presses with timestamps
 
 # custom global state
-world = World(max_map_size=24)
+world = World(max_map_size=48)
 log_world_map = False
 
 # always get comprehensive state regardless of websocket status
@@ -109,8 +110,8 @@ agent_lock = threading.Lock()
 websocket_connections = set()
 
 
-def pathfind(X, Y, facing, **kwargs):
-    deltas = world.pathfind_on_current_map((X, Y))
+def pathfind(X, Y, map_slice, facing, **kwargs):
+    deltas = map_slice.pathfind((Y, X), reduce=True)
     # print(np.fromstring(deltas[0], dtype=int))
     if deltas is None:
         return deltas
@@ -141,9 +142,9 @@ def pathfind(X, Y, facing, **kwargs):
     return movements
 
 # cash999 tools:
-tools = {
+tool_library = ToolLibrary({
     'PATHFIND': pathfind
-}
+})
 
 # Button mapping for manual control
 button_map = {
@@ -279,7 +280,7 @@ class AgentModules:
                 if simple_mode:
                     return self._simple_mode_processing(frame, game_state)
 
-                # Full mode: use all four agent modules
+                '''# Full mode: use all four agent modules
                 # 1. Perception - analyze current game state
                 observation, slow_thinking_needed = perception_step(frame, game_state, self.vlm)
                 self.last_observation = observation
@@ -313,23 +314,29 @@ class AgentModules:
                     self.vlm
                 )
                 self.current_plan = plan_result
-                self.last_plan = plan_result
+                self.last_plan = plan_result'''
+
+                observation = ''
+                self.memory_context = ''
+                self.current_plan = ''
+                self.last_plan = ''
 
                 # 4. Action - select specific button input
-                action_output = action_step(
+                action_list = action_step(
                     self.memory_context,
                     self.current_plan,
                     observation,
                     frame,
                     game_state,
+                    world,
                     self.recent_actions,
-                    self.vlm
+                    self.vlm,
+                    tool_library
                 )
 
-                # these are tool args not provided by the llm
-                # e.g. pathfind tool needs the current orientation
-                # check what kwargs are needed for what tool and pipe them in
+                # OLD HANDLING - THIS HAS BEEN MOVED TO AGENT.PY
 
+                '''
                 environment_kwargs = {
                     "facing": game_state["player"]["facing"]
                 }
@@ -338,7 +345,6 @@ class AgentModules:
                 print(action_output)
 
                 tool = get_tool(action_output, environment_kwargs, 'PATHFIND')
-
 
                 if tool is not None:
                     print('detected tool')
@@ -353,6 +359,7 @@ class AgentModules:
 
                 else:
                     action_list = action_output
+                '''
 
 
 
@@ -470,61 +477,6 @@ Respond with just the button name (e.g., 'A' or 'RIGHT'). Be decisive and avoid 
             "model": self.model_name
         }
 
-
-# cash999: get_tool here
-def get_tool(agent_output, environment_kwargs, valid_tools):
-    """
-    Processes agent output to extract and execute valid tools.
-
-    This function processes the output of an agent, identifies any calls to valid
-    tools, and executes them using the provided environment and tool parameters.
-    Each tool call is formatted as `<tool_name>{ ... }</tool_name>` in the agent's
-    output. If a matching tool is found, its execution is returned as a callable
-    function, with parameters merged from the environment and the agent's output.
-
-    Parameters:
-        agent_output: str
-            The textual output from the agent containing potential tool calls.
-        environment_kwargs: dict
-            Dictionary of environment parameters to be used or overridden by tool
-            parameters.
-        valid_tools: Union[str, List[str]]
-            A list of valid tool names or a single tool name to be identified and
-            executed.
-
-    Returns:
-        Callable:
-            A callable function to execute the identified tool with its merged
-            parameters, or None if no valid tool call is detected.
-
-    Raises:
-        json5.JSON5DecodeError:
-            If the agent output contains a tool call with invalid JSON content.
-    """
-
-    if isinstance(valid_tools, str):
-        valid_tools = [valid_tools]
-
-    agent_output = agent_output.upper()
-
-    for vt in valid_tools:
-        match = re.search(r"(?<=<" + vt + ">).*(?=</" + vt + ">)", agent_output)  # TODO first search only; do we need
-        # multiple calls?
-
-        if match is not None:
-            try:
-                llm_kwargs = json5.loads(match.group(0))
-                print(llm_kwargs)
-            except json5.JSON5DecodeError as e:
-                print(f"Tool " + vt + " called by agent but failed parsing JSON: {e}\nJSON: " + match.group(0))
-
-            kwargs = environment_kwargs | llm_kwargs # overwrite environment
-
-            return lambda: tools[vt](**kwargs)
-            # assume the tool produces a seq of actions for now; future tools might not TODO
-
-    # else we didn't detect a tool call
-    return None
 
 
 async def broadcast_state_update():
@@ -876,11 +828,11 @@ def handle_input(manual_mode=True):
             elif event.key == pygame.K_6:
                 if emulator:
                     print('Map 0:')
-                    map_0, coords = world.get_map(0, channel_mask=[0], get_coords=True)
-                    # print(map_0) # get tile ids only
-                    # print(map_0.shape)
+                    map_0, coords = world.current_map(return_coords=True)
 
                     if map_0 is not None:
+                        map_0 = map_0.map[:, :, 0]
+
                         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
                         np.savetxt(f"./world/logs/csv/map_0_" + str(timestamp) + ".csv", map_0, delimiter=",")
@@ -904,21 +856,10 @@ def handle_input(manual_mode=True):
                         save_screenshot()
 
             elif event.key == pygame.K_7:  # run pathfinding debug test
-                if emulator:
-                    global last_game_state # using this for now
+                loc = emulator.memory_reader.read_location()
+                coords = emulator.memory_reader.read_coordinates()
+                print(loc, coords)
 
-                    environment_kwargs = {
-                        "facing": last_game_state["player"]["facing"]
-                    }
-
-                    print('Pathfinding to ' + str(debug_pathfind_to))
-                    output = get_tool('<PATHFIND>{"x": ' + str(debug_pathfind_to[0]) + ', "y": ' + str(
-                        debug_pathfind_to[0]) + '}</PATHFIND>',
-                                      'PATHFIND')
-                    print('Tool output: ' + str(output))
-
-                    agent_result_queue = output
-                    # actions_pressed = output # TODO is this correct?
 
 
     return True, actions_pressed
@@ -1201,10 +1142,15 @@ def background_emulator_loop():
                 # game_state = emulator.get_comprehensive_state() # no screenshot
 
                 tiles = emulator.memory_reader.read_map_around_player(radius=3)
-                world.observe(tiles)
+                coords = emulator.memory_reader.read_coordinates()
+                loc = emulator.memory_reader.read_location()
+
+                world.observe(tiles, coords=[coords[1], coords[0]], memory_location=loc) # Y, X format
+
+                # memory reader output is top-left origin (x, y). Numpy handling is top-left (y, x) so we switch around
 
             if agent_result_queue:
-                print('agent reuslt queue: ' + str(agent_result_queue))
+                # print('agent reuslt queue: ' + str(agent_result_queue))
 
                 agent_action = agent_result_queue.pop(0)
                 if agent_action and "action" in agent_action:

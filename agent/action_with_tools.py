@@ -5,19 +5,20 @@ import re
 from utils.vlm import VLM
 from utils.state_formatter import format_state_for_llm, format_state_summary, get_movement_options, \
     get_party_health_summary
+from utils.custom_state_formatter import custom_format_state_for_llm
 from agent.system_prompt import system_prompt
 
 # Set up module logging
 logger = logging.getLogger(__name__)
 
 
-def action_step(memory_context, current_plan, latest_observation, frame, state_data, recent_actions, vlm):
+def action_step(memory_context, current_plan, latest_observation, frame, state_data, world, recent_actions, vlm, tool_library):
     """
     Decide and perform the next action button(s) based on memory, plan, observation, and comprehensive state.
     Returns a list of action buttons as strings.
     """
     # Get formatted state context and useful summaries
-    state_context = format_state_for_llm(state_data)
+    state_context, map_slice = custom_format_state_for_llm(state_data, world=world)
     state_summary = format_state_summary(state_data)
     movement_options = get_movement_options(state_data)
     party_health = get_party_health_summary(state_data)
@@ -166,13 +167,20 @@ def action_step(memory_context, current_plan, latest_observation, frame, state_d
 
     # Split the response by commas and clean up
     # if there is a function, preferentially return the function
-    # TODO messy as we are checking for functions both here and in agent.py
-    function_matches = re.search(r"<[A-Z]*>.*</[A-Z]*>", action_response)
-    if function_matches:
-        print('awt: found function', function_matches.group(0))
-        return function_matches.group(0)
 
-    actions = [btn.strip() for btn in action_response.split(',') if btn.strip() in valid_buttons]
+    # we now check in the function
+
+    environment_kwargs = {
+        "facing": state_data["player"]["facing"],
+        "map_slice": map_slice
+    }
+
+    tool = tool_library.get_tool(action_response, environment_kwargs, 'PATHFIND')
+
+    if tool is not None:
+        actions = tool()
+    else:
+        actions = [btn.strip() for btn in action_response.split(',') if btn.strip() in valid_buttons]
 
     print(f"Parsed actions: {actions}")
     if len(actions) == 0:
